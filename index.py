@@ -29,7 +29,7 @@ theta_target = 0.0
 h_ext = (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((thetas - theta_target) ** 2 ) / (2 * sigma_ang**2))
 
 # list of beta values to sweep (low -> high order)
-beta_list = [1.0, 5.0, 400.0] #1.0,5.0,
+beta_list = [1.0,5.0,400.0] #1.0,5.0,
 
 # Egocentric turning gain (how fast agent turns toward population direction)
 kappa = 0.8
@@ -107,7 +107,7 @@ def run_sim(beta):
             pos_alloc[t+1, 1] = pos_alloc[t, 1] + v0 * np.sin(heading_alloc)
 
         # egocentric motion
-        heading_ego = wrap_pi(phi - heading_ego)
+        heading_ego = wrap_pi(phi + heading_ego)
         if t < L-1:
             pos_ego[t+1, 0] = pos_ego[t, 0] + v0 * np.cos(heading_ego)
             pos_ego[t+1, 1] = pos_ego[t, 1] + v0 * np.sin(heading_ego)
@@ -164,3 +164,4 @@ for i, beta in enumerate(beta_list):
 
 plt.tight_layout()
 plt.show()
+
