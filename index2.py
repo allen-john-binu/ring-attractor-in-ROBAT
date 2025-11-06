@@ -11,7 +11,7 @@ sigma_ang = 2*np.pi / Ns
 h0 = 0.0025
 hb = 0.0
 
-target_pos = np.array([5000.0, 5000.0])  
+target_pos = np.array([500.0, 500.0])  
 
 
 # for each neuron group what is the angles ????
@@ -31,8 +31,9 @@ J = np.cos(np.pi * (dist / np.pi) ** v)
 beta_list = [400.0] #1.0,5.0,
 
 # number of attempted spin updates per motion step
-t0 = 0.5
+t0 = 3
 updates_per_step = int(round(Ns * t0))
+print("Updates per step:", updates_per_step)
 
 # wrap to [-pi,pi]
 def wrap_pi(x):
@@ -55,7 +56,7 @@ def compute_h_ext(mode,pos_now,heading_ego):
             theta_target = theta_target + 2*np.pi
         
         thethaDegree = math.degrees(theta_target)
-        print("Angle theta_target (degrees):", thethaDegree)
+        #print("Angle theta_target (degrees):", thethaDegree)
         difference_target = circ_dist(thetas, theta_target)
         hext = (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((difference_target) ** 2) / (2 * sigma_ang**2))
         return hext
@@ -83,36 +84,46 @@ def run_sim(beta, mode='allocentric'):
 
     for t in range(L):
         h_ext = compute_h_ext(mode,pos[t],heading_ego)
+        if t == 0:
+            spins_proposed = spins.copy()
+        else:
+            spins_proposed = spins_history[t-1].copy()
         for _ in range(updates_per_step):
+            spins_current = spins_proposed.copy()
             i = np.random.randint(Ns)    
             # compute current energy
-            H_before = compute_H(spins, J, h_ext, hb, Ns)
+            H_before = compute_H(spins_current, J, h_ext, hb, Ns)
 
             # flip of spin i
-            spins_proposed = spins.copy()
-            spins_proposed[i] = -spins_proposed[i]
+            spins_current[i] = -spins_current[i]
 
             # compute new energy
-            H_after = compute_H(spins_proposed, J, h_ext, hb, Ns)
+            H_after = compute_H(spins_current, J, h_ext, hb, Ns)
 
             # delta H = H(after) - H(before)
             delta_H = H_after - H_before
             if delta_H < 0:
-                spins[i] = -spins[i] # Energy difference negative then flip
+                spins_proposed[i] = -spins_proposed[i] # Energy difference negative then flip
             else:
                 # Energy difference positive — accept with probability exp(-beta * delta_H)
                 if np.random.rand() < np.exp(-beta * delta_H):
-                    spins[i] = -spins[i]
+                    spins_proposed[i] = -spins_proposed[i]
 
-        spins_history[t] = spins.copy()
+        spins_history[t] = spins_proposed.copy()
 
-        active = spins > 0
+        # print(spins_proposed.size)
+        # plt.plot(range(100), spins_proposed)
+        # plt.title("Line Chart of Radians (Index 0 to 99)")
+        # plt.xlabel("Index")
+        # plt.ylabel("Radian Value")
+        # plt.show()
+
+        active = spins_proposed > 0
         n_active = np.count_nonzero(active)
         if n_active > 0:
-            temp = (thetas[active].sum())/n_active
-            phi = temp - np.pi
+            phi = (thetas[active].sum())/n_active
             thethaDegree = math.degrees(phi)
-            #print("Angle phi (degrees):", thethaDegree)
+            print("Angle phi (degrees):", thethaDegree)
         else:
             phi = 0.0  
         pop_angles[t] = phi
