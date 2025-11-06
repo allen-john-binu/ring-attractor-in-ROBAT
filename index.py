@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import matplotlib.pyplot as plt
 
 np.random.seed(1)
@@ -20,7 +21,7 @@ def circ_dist(a, b):
     return np.minimum(d, 2*np.pi - d)
 
 # synaptic connectivity of the network, J with parameter v
-v = 1.0  # shape parameter
+v = 0.5  # shape parameter
 dist = circ_dist(thetas[:, None], thetas[None, :])
 J = np.cos(np.pi * (dist / np.pi) ** v)
 
@@ -29,10 +30,7 @@ theta_target = 0.0
 h_ext = (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((thetas - theta_target) ** 2 ) / (2 * sigma_ang**2))
 
 # list of beta values to sweep (low -> high order)
-beta_list = [1.0,5.0,400.0] #1.0,5.0,
-
-# Egocentric turning gain (how fast agent turns toward population direction)
-kappa = 0.8
+beta_list = [200.0] #1.0,5.0,
 
 # number of attempted spin updates per motion step
 t0 = 0.5
@@ -40,7 +38,7 @@ updates_per_step = int(round(Ns * t0))
 
 # wrap to [-pi,pi]
 def wrap_pi(x):
-    return (x + np.pi) % (2*np.pi) - np.pi
+    return (x % (2*np.pi))
 
 # compute Hamiltonian for the system
 def compute_H(spins, J, h_ext, hb, Ns):
@@ -59,7 +57,7 @@ def run_sim(beta):
     # agent init
     pos_alloc = np.zeros((L, 2))
     pos_ego = np.zeros((L, 2))
-    heading_ego = np.random.uniform(-np.pi, np.pi) 
+    heading_ego = 0.0
     heading_alloc = 0.0
 
     x0, y0 = 0.0, 0.0
@@ -93,9 +91,10 @@ def run_sim(beta):
         active = spins > 0
         n_active = np.count_nonzero(active)
         if n_active > 0:
-            sx = np.cos(thetas[active]).sum() / n_active
-            sy = np.sin(thetas[active]).sum() / n_active
-            phi = np.arctan2(sy, sx)
+            temp = (thetas[active].sum())/n_active
+            phi = temp - np.pi
+            thethaDegree = math.degrees(phi)
+            print("Angle (degrees):", thethaDegree)
         else:
             phi = 0.0  
         pop_angles[t] = phi
