@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 np.random.seed(1)
 
 Ns = 100
-L = 1000     
+L = 500     
 v0 = 10.0              
 sigma_ang = 2*np.pi / Ns
 h0 = 0.0025
@@ -24,25 +24,27 @@ def circ_dist(a, b):
 
 # synaptic connectivity of the network, J with parameter v
 v = 0.5  # shape parameter
-dist = circ_dist(thetas[:, None], thetas[None, :])
-J = np.cos(np.pi * (dist / np.pi) ** v)
+def compute_J(theta_i):
+    dist = circ_dist(thetas[:, None], theta_i)
+    dist = dist.squeeze()
+    return np.cos((np.pi * ((dist / np.pi) ** v)))
 
 # list of beta values to sweep (low -> high order)
 beta_list = [400.0] #1.0,5.0,
 
 # number of attempted spin updates per motion step
-t0 = 3
+t0 = 50
 updates_per_step = int(round(Ns * t0))
-print("Updates per step:", updates_per_step)
 
-# wrap to [-pi,pi]
+# wrap to [0,2*pi]
 def wrap_pi(x):
-    return (x + np.pi) % (2*np.pi) - np.pi
+    return (x % (2*np.pi))
 
 # compute Hamiltonian for the system
-def compute_H(spins, J, h_ext, hb, Ns):
-    quad = (1.0 / Ns) * (spins @ (J @ spins))
-    linear = ((h_ext * spins) - (hb * spins)).sum()
+def compute_H(spins, h_ext, hb, Ns,i):
+    j_curr = compute_J(thetas[i])
+    quad =(1.0 / Ns) * np.dot(j_curr, spins) * spins[i]
+    linear = ((h_ext[i] * spins[i]) - (hb * spins[i]))
     H = - (quad + linear)
     return H
 
@@ -54,9 +56,6 @@ def compute_h_ext(mode,pos_now,heading_ego):
         theta_target = np.arctan2(dy, dx)
         if(theta_target < 0):
             theta_target = theta_target + 2*np.pi
-        
-        thethaDegree = math.degrees(theta_target)
-        #print("Angle theta_target (degrees):", thethaDegree)
         difference_target = circ_dist(thetas, theta_target)
         hext = (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((difference_target) ** 2) / (2 * sigma_ang**2))
         return hext
@@ -88,42 +87,49 @@ def run_sim(beta, mode='allocentric'):
             spins_proposed = spins.copy()
         else:
             spins_proposed = spins_history[t-1].copy()
+        deltaH_list = []
+        n_accepted = 0
+        acc_uphill = 0
+        acc_downhill = 0
         for _ in range(updates_per_step):
             spins_current = spins_proposed.copy()
-            i = np.random.randint(Ns)    
+            i = np.random.randint(Ns)  
             # compute current energy
-            H_before = compute_H(spins_current, J, h_ext, hb, Ns)
+            H_before = compute_H(spins_current, h_ext, hb, Ns,i)
 
             # flip of spin i
             spins_current[i] = -spins_current[i]
 
             # compute new energy
-            H_after = compute_H(spins_current, J, h_ext, hb, Ns)
+            H_after = compute_H(spins_current, h_ext, hb, Ns,i)
 
             # delta H = H(after) - H(before)
             delta_H = H_after - H_before
+            deltaH_list.append(delta_H)
             if delta_H < 0:
                 spins_proposed[i] = -spins_proposed[i] # Energy difference negative then flip
+                n_accepted += 1
+                acc_downhill += 1 
             else:
                 # Energy difference positive — accept with probability exp(-beta * delta_H)
-                if np.random.rand() < np.exp(-beta * delta_H):
+                p = np.exp(-beta * delta_H)
+                # safety clamp
+                if p > 1.0:
+                    p = 1.0
+                if np.random.rand() < p:
                     spins_proposed[i] = -spins_proposed[i]
+                    n_accepted += 1
+                    acc_uphill += 1
 
         spins_history[t] = spins_proposed.copy()
+        print("Accepted:", n_accepted," -  Downhill accepted:", acc_downhill, " -   Uphill accepted:", acc_uphill, " -   Delta_H mean: ",np.mean(deltaH_list))
 
-        # print(spins_proposed.size)
-        # plt.plot(range(100), spins_proposed)
-        # plt.title("Line Chart of Radians (Index 0 to 99)")
-        # plt.xlabel("Index")
-        # plt.ylabel("Radian Value")
-        # plt.show()
-
-        active = spins_proposed > 0
+        active = spins_history[t] > 0
         n_active = np.count_nonzero(active)
         if n_active > 0:
             phi = (thetas[active].sum())/n_active
             thethaDegree = math.degrees(phi)
-            print("Angle phi (degrees):", thethaDegree)
+            print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active )
         else:
             phi = 0.0  
         pop_angles[t] = phi
@@ -205,7 +211,7 @@ for i, beta in enumerate(beta_list):
     ax_alloc.scatter(*target_pos, color='black', marker='x', s=40, label='target')
     ax_alloc.set_title(f"(C{i+1}) Allocentric, β={beta:.2f}")
     ax_alloc.set_aspect('equal')
-    ax_alloc.legend()
+    # ax_alloc.legend()
 
 plt.tight_layout()
 plt.show()

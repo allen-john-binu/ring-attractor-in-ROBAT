@@ -22,28 +22,31 @@ def circ_dist(a, b):
 
 # synaptic connectivity of the network, J with parameter v
 v = 0.5  # shape parameter
-dist = circ_dist(thetas[:, None], thetas[None, :])
-J = np.cos(np.pi * (dist / np.pi) ** v)
+def compute_J(theta_i):
+    dist = circ_dist(thetas[:, None], theta_i)
+    dist = dist.squeeze()
+    return np.cos((np.pi * ((dist / np.pi) ** v)))
 
 # external field
 theta_target = 0.0 
 h_ext = (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((thetas - theta_target) ** 2 ) / (2 * sigma_ang**2))
 
 # list of beta values to sweep (low -> high order)
-beta_list = [200.0] #1.0,5.0,
+beta_list = [1.0,20.0,400.0]
 
 # number of attempted spin updates per motion step
-t0 = 0.5
+t0 = 50
 updates_per_step = int(round(Ns * t0))
 
-# wrap to [-pi,pi]
+# wrap to [0,2*pi]
 def wrap_pi(x):
     return (x % (2*np.pi))
 
 # compute Hamiltonian for the system
-def compute_H(spins, J, h_ext, hb, Ns):
-    quad = (1.0 / Ns) * (spins @ (J @ spins))
-    linear = ((h_ext - hb) * spins).sum()
+def compute_H(spins, h_ext, hb, Ns,i):
+    j_curr = compute_J(thetas[i])
+    quad =(1.0 / Ns) * np.dot(j_curr, spins) * spins[i]
+    linear = ((h_ext[i] * spins[i]) - (hb * spins[i]))
     H = - (quad + linear)
     return H
 
@@ -65,36 +68,44 @@ def run_sim(beta):
     pos_ego[0] = np.array([x0, y0])
 
     for t in range(L):
+        if t == 0:
+            spins_proposed = spins.copy()
+        else:
+            spins_proposed = spins_history[t-1].copy()
         for _ in range(updates_per_step):
-            i = np.random.randint(Ns)    
+            spins_current = spins_proposed.copy()
+            i = np.random.randint(Ns)  
             # compute current energy
-            H_before = compute_H(spins, J, h_ext, hb, Ns)
+            H_before = compute_H(spins_current, h_ext, hb, Ns,i)
 
             # flip of spin i
-            spins_proposed = spins.copy()
-            spins_proposed[i] = -spins_proposed[i]
+            spins_current[i] = -spins_current[i]
 
             # compute new energy
-            H_after = compute_H(spins_proposed, J, h_ext, hb, Ns)
+            H_after = compute_H(spins_current, h_ext, hb, Ns,i)
 
             # delta H = H(after) - H(before)
             delta_H = H_after - H_before
             if delta_H < 0:
-                spins[i] = -spins[i] # Energy difference negative then flip
+                spins_proposed[i] = -spins_proposed[i] # Energy difference negative then flip
             else:
                 # Energy difference positive — accept with probability exp(-beta * delta_H)
-                if np.random.rand() < np.exp(-beta * delta_H):
-                    spins[i] = -spins[i]
+                p = np.exp(-beta * delta_H)
+                # safety clamp
+                if p > 1.0:
+                    p = 1.0
+                if np.random.rand() < p:
+                    spins_proposed[i] = -spins_proposed[i]
 
-        spins_history[t] = spins.copy()
+        spins_history[t] = spins_proposed.copy()
 
-        active = spins > 0
+
+        active = spins_history[t] > 0
         n_active = np.count_nonzero(active)
         if n_active > 0:
-            temp = (thetas[active].sum())/n_active
-            phi = temp - np.pi
+            phi = (thetas[active].sum())/n_active
             thethaDegree = math.degrees(phi)
-            print("Angle (degrees):", thethaDegree)
+            print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active )
         else:
             phi = 0.0  
         pop_angles[t] = phi
