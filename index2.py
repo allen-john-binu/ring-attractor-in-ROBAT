@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 np.random.seed(1)
 
 Ns = 100
-L = 500     
+L = 1000     
 v0 = 10.0              
 sigma_ang = 2*np.pi / Ns
 h0 = 0.0025
@@ -27,10 +27,20 @@ v = 0.5  # shape parameter
 def compute_J(theta_i):
     dist = circ_dist(thetas[:, None], theta_i)
     dist = dist.squeeze()
-    return np.cos((np.pi * ((dist / np.pi) ** v)))
+    normalized = dist / np.pi 
+    powered = normalized ** v
+    return np.cos((np.pi * powered))
+
+# J_for_test = compute_J(thetas[50])
+# print(compute_J(J_for_test).size)
+# plt.plot(range(100), J_for_test)
+# plt.title("J value with neuron at index 50")
+# plt.xlabel("Index")
+# plt.ylabel("Value")
+# plt.show()
 
 # list of beta values to sweep (low -> high order)
-beta_list = [400.0] #1.0,5.0,
+beta_list = [20000.0] #1.0,5.0,
 
 # number of attempted spin updates per motion step
 t0 = 50
@@ -43,6 +53,12 @@ def wrap_pi(x):
 # compute Hamiltonian for the system
 def compute_H(spins, h_ext, hb, Ns,i):
     j_curr = compute_J(thetas[i])
+    # print("jcurr size and i value: ",j_curr.size, i)
+    # plt.plot(range(100), j_curr)
+    # plt.title("J value with neuron at current index")
+    # plt.xlabel("Index")
+    # plt.ylabel("Value")
+    # plt.show()
     quad =(1.0 / Ns) * np.dot(j_curr, spins) * spins[i]
     linear = ((h_ext[i] * spins[i]) - (hb * spins[i]))
     H = - (quad + linear)
@@ -57,7 +73,21 @@ def compute_h_ext(mode,pos_now,heading_ego):
         if(theta_target < 0):
             theta_target = theta_target + 2*np.pi
         difference_target = circ_dist(thetas, theta_target)
-        hext = (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((difference_target) ** 2) / (2 * sigma_ang**2))
+        hext = (h0 / np.sqrt(2 * np.pi * (sigma_ang**2))) * np.exp(- ( ((difference_target) ** 2) / (2 * sigma_ang**2) ) )
+        # print("difference target size and theta value: ",difference_target.size,theta_target)
+        # plt.plot(range(100), difference_target,color='blue')
+        # plt.plot(range(100), thetas,color='red')
+        # plt.title("difference_target for neurons with target")
+        # plt.xlabel("Index")
+        # plt.ylabel("Value")
+        # plt.show()
+
+        # print("hext size and theta value: ",hext.size)
+        # plt.plot(range(100), hext)
+        # plt.title("h_ext for neurons with target ")
+        # plt.xlabel("Index")
+        # plt.ylabel("Value")
+        # plt.show()
         return hext
     else:
         # relative direction from current heading to target
@@ -68,7 +98,7 @@ def compute_h_ext(mode,pos_now,heading_ego):
 
 def run_sim(beta, mode='allocentric'):
     # initial random spins
-    spins = np.random.choice([-1, 1], size=(Ns,))
+    spins = np.random.choice([0, 1], size=(Ns,))
     spins_history = np.zeros((L, Ns), dtype=int)
 
     pop_angles = np.zeros(L)
@@ -98,7 +128,10 @@ def run_sim(beta, mode='allocentric'):
             H_before = compute_H(spins_current, h_ext, hb, Ns,i)
 
             # flip of spin i
-            spins_current[i] = -spins_current[i]
+            if(spins_current[i] == 1):
+                spins_current[i] = 0
+            else:
+                spins_current[i] = 1
 
             # compute new energy
             H_after = compute_H(spins_current, h_ext, hb, Ns,i)
@@ -107,7 +140,10 @@ def run_sim(beta, mode='allocentric'):
             delta_H = H_after - H_before
             deltaH_list.append(delta_H)
             if delta_H < 0:
-                spins_proposed[i] = -spins_proposed[i] # Energy difference negative then flip
+                if(spins_proposed[i] == 1):
+                    spins_proposed[i] = 0
+                else:
+                    spins_proposed[i] = 1 # Energy difference negative then flip
                 n_accepted += 1
                 acc_downhill += 1 
             else:
@@ -117,19 +153,43 @@ def run_sim(beta, mode='allocentric'):
                 if p > 1.0:
                     p = 1.0
                 if np.random.rand() < p:
-                    spins_proposed[i] = -spins_proposed[i]
+                    # flip of spin i
+                    if(spins_proposed[i] == 1):
+                        spins_proposed[i] = 0
+                    else:
+                        spins_proposed[i] = 1
                     n_accepted += 1
                     acc_uphill += 1
 
         spins_history[t] = spins_proposed.copy()
-        print("Accepted:", n_accepted," -  Downhill accepted:", acc_downhill, " -   Uphill accepted:", acc_uphill, " -   Delta_H mean: ",np.mean(deltaH_list))
+        # print("spins_history[t] size: ",spins_history[t].size)
+        # fig, axs = plt.subplots(3, 1, figsize=(8, 10))
+        # if t == 0:
+        #     axs[0].plot(range(100), spins, color='blue')
+        #     axs[0].set_title('spins at 0')
+        #     axs[0].grid(True)
+        # else:
+        #     axs[0].plot(range(100), spins_history[t-1], color='blue')
+        #     axs[0].set_title('spins at t='+str(t-1))
+        #     axs[0].grid(True)
+        # axs[1].plot(range(100), spins_proposed, color='red')
+        # axs[1].set_title('spins proposed at t='+str(t))
+        # axs[1].grid(True)
+        # axs[2].plot(range(100), spins_history[t], color='green')
+        # axs[2].set_title('spins history at t='+str(t))
+        # axs[2].grid(True)
+        # for ax in axs:
+        #     ax.set_xlabel('Index')
+        #     ax.set_ylabel('Value')
+        # plt.tight_layout()
+        # plt.show()
 
         active = spins_history[t] > 0
         n_active = np.count_nonzero(active)
         if n_active > 0:
             phi = (thetas[active].sum())/n_active
             thethaDegree = math.degrees(phi)
-            print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active )
+            print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active," -- Accepted:", n_accepted,"-  Downhill accepted:", acc_downhill, " -   Uphill accepted:", acc_uphill, " -   Delta_H mean: ",np.mean(deltaH_list))
         else:
             phi = 0.0  
         pop_angles[t] = phi

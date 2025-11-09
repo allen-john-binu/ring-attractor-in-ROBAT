@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 np.random.seed(1)
 
 Ns = 100
-L = 1000              
+L = 1000     
 v0 = 10.0              
 sigma_ang = 2*np.pi / Ns
 h0 = 0.0
@@ -17,8 +17,7 @@ thetas = np.arange(Ns) * sigma_ang
 
 # So without wrapping, neurons on opposite ends of the ring look maximally far apart, breaking the ring’s continuity
 def circ_dist(a, b):
-    d = np.abs(a - b)
-    return np.minimum(d, 2*np.pi - d)
+    return ( np.abs(a - b) % (2*np.pi) )
 
 # synaptic connectivity of the network, J with parameter v
 v = 0.5  # shape parameter
@@ -52,7 +51,7 @@ def compute_H(spins, h_ext, hb, Ns,i):
 
 def run_sim(beta):
     # initial random spins
-    spins = np.random.choice([-1, 1], size=(Ns,))
+    spins = np.random.choice([0, 1], size=(Ns,))
     spins_history = np.zeros((L, Ns), dtype=int)
 
     pop_angles = np.zeros(L)
@@ -79,7 +78,10 @@ def run_sim(beta):
             H_before = compute_H(spins_current, h_ext, hb, Ns,i)
 
             # flip of spin i
-            spins_current[i] = -spins_current[i]
+            if(spins_current[i] == 1):
+                spins_current[i] = 0
+            else:
+                spins_current[i] = 1
 
             # compute new energy
             H_after = compute_H(spins_current, h_ext, hb, Ns,i)
@@ -87,7 +89,10 @@ def run_sim(beta):
             # delta H = H(after) - H(before)
             delta_H = H_after - H_before
             if delta_H < 0:
-                spins_proposed[i] = -spins_proposed[i] # Energy difference negative then flip
+                if(spins_proposed[i] == 1):
+                    spins_proposed[i] = 0
+                else:
+                    spins_proposed[i] = 1 # Energy difference negative then flip
             else:
                 # Energy difference positive — accept with probability exp(-beta * delta_H)
                 p = np.exp(-beta * delta_H)
@@ -95,7 +100,11 @@ def run_sim(beta):
                 if p > 1.0:
                     p = 1.0
                 if np.random.rand() < p:
-                    spins_proposed[i] = -spins_proposed[i]
+                    # flip of spin i
+                    if(spins_proposed[i] == 1):
+                        spins_proposed[i] = 0
+                    else:
+                        spins_proposed[i] = 1
 
         spins_history[t] = spins_proposed.copy()
 
