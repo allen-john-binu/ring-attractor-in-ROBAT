@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+import copy
 
 np.random.seed(1)
 
@@ -11,183 +12,123 @@ sigma_ang = 2*np.pi / Ns
 h0 = 0.0025
 hb = 0.0
 
-target_pos = np.array([500.0, 500.0])  
+target_pos = np.array([100.0, 100.0])  
 
 
-# for each neuron group what is the angles ????
+# for each neuron group what is the angles 
 thetas = np.arange(Ns) * sigma_ang
 
-# So without wrapping, neurons on opposite ends of the ring look maximally far apart, breaking the ring’s continuity
+# list of beta values to sweep (low -> high order)
+beta_list = [10.0] #1.0,5.0,
+
+# number of attempted spin updates per motion step
+t0 = 50
+updates_per_step = int(round(Ns * t0))
+
 def circ_dist(a, b):
     d = np.abs(a - b)
     return np.minimum(d, 2*np.pi - d)
 
+# Compute dynamic external field depending on i
+def compute_h_ext_for_i(theta_diff):
+    difference_target = circ_dist(thetas, theta_diff)
+    return (h0 / np.sqrt(2 * np.pi * (sigma_ang**2))) * np.exp(- (difference_target ** 2) / (2 * (sigma_ang**2) ) )
+
 # synaptic connectivity of the network, J with parameter v
 v = 0.5  # shape parameter
-def compute_J(theta_i):
-    dist = circ_dist(thetas[:, None], theta_i)
-    dist = dist.squeeze()
-    normalized = dist / np.pi 
+def compute_J(i):
+    considering_alhpa_i = copy.deepcopy(thetas[i])
+    considering_alphas = copy.deepcopy(thetas)
+    
+    angle_diffs = np.abs((considering_alphas - considering_alhpa_i + np.pi) % (2 * np.pi) - np.pi)
+    angle_diffs = angle_diffs.squeeze()
+    normalized = angle_diffs / np.pi 
     powered = normalized ** v
     return np.cos((np.pi * powered))
 
-# J_for_test = compute_J(thetas[50])
-# print(compute_J(J_for_test).size)
+# J_for_test = compute_J(50)
+# print(J_for_test.size)
 # plt.plot(range(100), J_for_test)
 # plt.title("J value with neuron at index 50")
 # plt.xlabel("Index")
 # plt.ylabel("Value")
 # plt.show()
 
-# list of beta values to sweep (low -> high order)
-beta_list = [20000.0] #1.0,5.0,
-
-# number of attempted spin updates per motion step
-t0 = 50
-updates_per_step = int(round(Ns * t0))
-
-# wrap to [0,2*pi]
-def wrap_pi(x):
-    return (x % (2*np.pi))
-
 # compute Hamiltonian for the system
-def compute_H(spins, h_ext, hb, Ns,i):
-    j_curr = compute_J(thetas[i])
-    # print("jcurr size and i value: ",j_curr.size, i)
-    # plt.plot(range(100), j_curr)
-    # plt.title("J value with neuron at current index")
-    # plt.xlabel("Index")
-    # plt.ylabel("Value")
-    # plt.show()
-    quad =(1.0 / Ns) * np.dot(j_curr, spins) * spins[i]
-    linear = ((h_ext[i] * spins[i]) - (hb * spins[i]))
-    H = - (quad + linear)
-    return H
+def compute_delta_H(spins, h_ext, i):
+    computing_spins = copy.deepcopy(spins)
+    j_curr = compute_J(i)
+    j_curr[i] = 0  # zero out self-connection
 
-def compute_h_ext(mode,pos_now,heading_ego):
-    # --- Compute dynamic external field depending on mode ---
-    if mode == 'allocentric':
-        # absolute direction from agent to target
-        dx, dy = target_pos - pos_now
-        theta_target = np.arctan2(dy, dx)
-        if(theta_target < 0):
-            theta_target = theta_target + 2*np.pi
-        difference_target = circ_dist(thetas, theta_target)
-        hext = (h0 / np.sqrt(2 * np.pi * (sigma_ang**2))) * np.exp(- ( ((difference_target) ** 2) / (2 * sigma_ang**2) ) )
-        # print("difference target size and theta value: ",difference_target.size,theta_target)
-        # plt.plot(range(100), difference_target,color='blue')
-        # plt.plot(range(100), thetas,color='red')
-        # plt.title("difference_target for neurons with target")
-        # plt.xlabel("Index")
-        # plt.ylabel("Value")
-        # plt.show()
+    spins_energy = np.dot(j_curr, computing_spins)
+    before_spin = computing_spins[i]
+    after_spin = 1 - computing_spins[i]
 
-        # print("hext size and theta value: ",hext.size)
-        # plt.plot(range(100), hext)
-        # plt.title("h_ext for neurons with target ")
-        # plt.xlabel("Index")
-        # plt.ylabel("Value")
-        # plt.show()
-        return hext
-    else:
-        # relative direction from current heading to target
-        dx, dy = target_pos - pos_now
-        theta_abs = np.arctan2(dy, dx)
-        theta_target = theta_abs - heading_ego
-        return (h0 / np.sqrt(2 * np.pi * sigma_ang**2)) * np.exp(-((thetas - theta_target) ** 2) / (2 * sigma_ang**2))
+    external_energy_before = (h_ext[i] * before_spin) - (hb * before_spin)
+    spins_energy_before = (1.0 / (Ns-1)) * spins_energy * before_spin
+    H_before = - (spins_energy_before + external_energy_before)
+
+    external_energy_after = (h_ext[i] * after_spin) - (hb * after_spin)
+    spins_energy_after = (1.0 / (Ns-1)) * spins_energy * after_spin
+    H_after = - (spins_energy_after + external_energy_after)
+
+    return (H_after - H_before)
 
 def run_sim(beta, mode='allocentric'):
-    # initial random spins
-    spins = np.random.choice([0, 1], size=(Ns,))
+    # initial random spins with equal number of -1 and 1
+    spins = np.concatenate((np.ones(Ns // 2, dtype=int), -np.ones(Ns // 2, dtype=int)))
+    np.random.shuffle(spins)
     spins_history = np.zeros((L, Ns), dtype=int)
-
     pop_angles = np.zeros(L)
 
     # agent init
     pos = np.zeros((L, 2))
-    heading_ego = np.random.uniform(0, 2*np.pi) 
-    heading_alloc = 0.0
-
-    x0, y0 = 0.0, 0.0
-    pos[0] = np.array([x0, y0])
+    heading = 0.0
+    pos[0] = np.array([0.0, 0.0])
 
     for t in range(L):
-        h_ext = compute_h_ext(mode,pos[t],heading_ego)
-        if t == 0:
-            spins_proposed = spins.copy()
+        theta_target = np.arctan2(target_pos[0] - pos[t][0], target_pos[1] - pos[t][1])
+        if mode == 'egocentric':
+            theta_diff = (theta_target-heading) % (2 * np.pi) 
         else:
-            spins_proposed = spins_history[t-1].copy()
+            theta_diff = theta_target
+
         deltaH_list = []
         n_accepted = 0
         acc_uphill = 0
         acc_downhill = 0
+
+        h_ext = compute_h_ext_for_i(theta_diff)
+        # plt.plot(range(100), h_ext)
+        # plt.title("h_ext for neurons with target")
+        # plt.xlabel("Index")
+        # plt.ylabel("Value")
+        # plt.show()
         for _ in range(updates_per_step):
-            spins_current = spins_proposed.copy()
-            i = np.random.randint(Ns)  
-            # compute current energy
-            H_before = compute_H(spins_current, h_ext, hb, Ns,i)
+            i = np.random.randint(0,Ns) 
+            delta_H = compute_delta_H(spins, h_ext, i)
 
-            # flip of spin i
-            if(spins_current[i] == 1):
-                spins_current[i] = 0
-            else:
-                spins_current[i] = 1
-
-            # compute new energy
-            H_after = compute_H(spins_current, h_ext, hb, Ns,i)
-
-            # delta H = H(after) - H(before)
-            delta_H = H_after - H_before
             deltaH_list.append(delta_H)
+
             if delta_H < 0:
-                if(spins_proposed[i] == 1):
-                    spins_proposed[i] = 0
-                else:
-                    spins_proposed[i] = 1 # Energy difference negative then flip
+                # Energy difference negative — always accept
+                spins[i] *= -1
+
                 n_accepted += 1
                 acc_downhill += 1 
             else:
                 # Energy difference positive — accept with probability exp(-beta * delta_H)
                 p = np.exp(-beta * delta_H)
-                # safety clamp
-                if p > 1.0:
-                    p = 1.0
                 if np.random.rand() < p:
-                    # flip of spin i
-                    if(spins_proposed[i] == 1):
-                        spins_proposed[i] = 0
-                    else:
-                        spins_proposed[i] = 1
+                    spins[i] *= -1
+
                     n_accepted += 1
-                    acc_uphill += 1
+                    acc_uphill += 1 
 
-        spins_history[t] = spins_proposed.copy()
-        # print("spins_history[t] size: ",spins_history[t].size)
-        # fig, axs = plt.subplots(3, 1, figsize=(8, 10))
-        # if t == 0:
-        #     axs[0].plot(range(100), spins, color='blue')
-        #     axs[0].set_title('spins at 0')
-        #     axs[0].grid(True)
-        # else:
-        #     axs[0].plot(range(100), spins_history[t-1], color='blue')
-        #     axs[0].set_title('spins at t='+str(t-1))
-        #     axs[0].grid(True)
-        # axs[1].plot(range(100), spins_proposed, color='red')
-        # axs[1].set_title('spins proposed at t='+str(t))
-        # axs[1].grid(True)
-        # axs[2].plot(range(100), spins_history[t], color='green')
-        # axs[2].set_title('spins history at t='+str(t))
-        # axs[2].grid(True)
-        # for ax in axs:
-        #     ax.set_xlabel('Index')
-        #     ax.set_ylabel('Value')
-        # plt.tight_layout()
-        # plt.show()
-
-        active = spins_history[t] > 0
-        n_active = np.count_nonzero(active)
+        active_indices = np.where(spins == 1)[0]
+        n_active = len(active_indices)
         if n_active > 0:
-            phi = (thetas[active].sum())/n_active
+            phi = np.angle(np.sum(np.exp(1j * thetas[active_indices])))
             thethaDegree = math.degrees(phi)
             print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active," -- Accepted:", n_accepted,"-  Downhill accepted:", acc_downhill, " -   Uphill accepted:", acc_uphill, " -   Delta_H mean: ",np.mean(deltaH_list))
         else:
@@ -196,16 +137,17 @@ def run_sim(beta, mode='allocentric'):
 
         if mode == 'egocentric':
             # egocentric motion
-            heading_ego = wrap_pi(phi + heading_ego)
+            heading = (phi + heading) % (2 * np.pi) 
             if t < L-1:
-                pos[t+1, 0] = pos[t, 0] + v0 * np.cos(heading_ego)
-                pos[t+1, 1] = pos[t, 1] + v0 * np.sin(heading_ego)
+                pos[t+1, 0] = pos[t, 0] + v0 * np.cos(heading)
+                pos[t+1, 1] = pos[t, 1] + v0 * np.sin(heading)
         else:
             # allocentric motion
-            heading_alloc = phi
             if t < L-1:
-                pos[t+1, 0] = pos[t, 0] + v0 * np.cos(heading_alloc)
-                pos[t+1, 1] = pos[t, 1] + v0 * np.sin(heading_alloc)
+                pos[t+1, 0] = pos[t, 0] + v0 * np.cos(phi)
+                pos[t+1, 1] = pos[t, 1] + v0 * np.sin(phi)
+
+        spins_history[t] = copy.deepcopy(spins)
 
     return {
         "spins_history": spins_history,
