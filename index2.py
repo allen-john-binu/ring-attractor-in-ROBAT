@@ -2,27 +2,29 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 import copy
+import time
+from matplotlib.animation import FuncAnimation
 
 np.random.seed(1)
 
 Ns = 100
-L = 1000     
-v0 = 10.0              
-sigma_ang = 2*np.pi / Ns
-h0 = 0.0025
-hb = 0.0
+L = 100   
+v0 = 6.0              
+sigma_ang = 5*np.pi / Ns
+diff_neurons_angle = 2*np.pi / Ns
+h0 = 0.0051
+hb = 0.00122
 
-target_pos = np.array([100.0, 100.0])  
-
+target_pos = np.array([50.0, 0.0])  
 
 # for each neuron group what is the angles 
-thetas = np.arange(Ns) * sigma_ang
+thetas = np.arange(Ns) * diff_neurons_angle - np.pi 
 
 # list of beta values to sweep (low -> high order)
-beta_list = [10.0] #1.0,5.0,
+beta_list = [400.0] #1.0,5.0,
 
 # number of attempted spin updates per motion step
-t0 = 50
+t0 = 10
 updates_per_step = int(round(Ns * t0))
 
 def circ_dist(a, b):
@@ -46,7 +48,12 @@ def compute_J(i):
     powered = normalized ** v
     return np.cos((np.pi * powered))
 
-# J_for_test = compute_J(50)
+dist = circ_dist(thetas[:, None], thetas[None, :])
+J_full = np.cos(np.pi * (dist / np.pi) ** v)
+
+# print("J_full shape:", J_full.shape)
+
+# J_for_test = compute_J(25)
 # print(J_for_test.size)
 # plt.plot(range(100), J_for_test)
 # plt.title("J value with neuron at index 50")
@@ -61,8 +68,8 @@ def compute_delta_H(spins, h_ext, i):
     j_curr[i] = 0  # zero out self-connection
 
     spins_energy = np.dot(j_curr, computing_spins)
-    before_spin = computing_spins[i]
-    after_spin = 1 - computing_spins[i]
+    before_spin = copy.deepcopy(computing_spins[i])
+    after_spin = 1 - before_spin
 
     external_energy_before = (h_ext[i] * before_spin) - (hb * before_spin)
     spins_energy_before = (1.0 / (Ns-1)) * spins_energy * before_spin
@@ -74,9 +81,19 @@ def compute_delta_H(spins, h_ext, i):
 
     return (H_after - H_before)
 
+def compute_total_H(spins, h_ext):
+    computing_spins = copy.deepcopy(spins)
+    temp = np.dot((J_full @ computing_spins), computing_spins)
+    external_energy = np.dot(h_ext, computing_spins)
+    return - ((1.0/Ns)*temp - external_energy)
+
+hext_for_time = []
+bump_for_time = []
+target_for_time = []
+
 def run_sim(beta, mode='allocentric'):
     # initial random spins with equal number of -1 and 1
-    spins = np.concatenate((np.ones(Ns // 2, dtype=int), -np.ones(Ns // 2, dtype=int)))
+    spins = np.concatenate((np.ones(Ns // 2, dtype=int), np.zeros(Ns // 2, dtype=int)))
     np.random.shuffle(spins)
     spins_history = np.zeros((L, Ns), dtype=int)
     pop_angles = np.zeros(L)
@@ -85,9 +102,10 @@ def run_sim(beta, mode='allocentric'):
     pos = np.zeros((L, 2))
     heading = 0.0
     pos[0] = np.array([0.0, 0.0])
+    total_H = []
 
     for t in range(L):
-        theta_target = np.arctan2(target_pos[0] - pos[t][0], target_pos[1] - pos[t][1])
+        theta_target = np.arctan2( target_pos[1] - pos[t][1],target_pos[0] - pos[t][0])
         if mode == 'egocentric':
             theta_diff = (theta_target-heading) % (2 * np.pi) 
         else:
@@ -99,11 +117,9 @@ def run_sim(beta, mode='allocentric'):
         acc_downhill = 0
 
         h_ext = compute_h_ext_for_i(theta_diff)
-        # plt.plot(range(100), h_ext)
-        # plt.title("h_ext for neurons with target")
-        # plt.xlabel("Index")
-        # plt.ylabel("Value")
-        # plt.show()
+        hext_for_time.append(h_ext)
+        target_for_time.append(theta_target)
+        total_H.append(compute_total_H(spins, h_ext))
         for _ in range(updates_per_step):
             i = np.random.randint(0,Ns) 
             delta_H = compute_delta_H(spins, h_ext, i)
@@ -112,7 +128,7 @@ def run_sim(beta, mode='allocentric'):
 
             if delta_H < 0:
                 # Energy difference negative — always accept
-                spins[i] *= -1
+                spins[i] = 1 - spins[i]
 
                 n_accepted += 1
                 acc_downhill += 1 
@@ -120,10 +136,16 @@ def run_sim(beta, mode='allocentric'):
                 # Energy difference positive — accept with probability exp(-beta * delta_H)
                 p = np.exp(-beta * delta_H)
                 if np.random.rand() < p:
-                    spins[i] *= -1
+                    spins[i] = 1 - spins[i]
 
                     n_accepted += 1
                     acc_uphill += 1 
+
+        # plt.plot(np.degrees(thetas), h_ext)
+        # plt.title("h_ext for neurons with target")
+        # plt.xlabel("Index")
+        # plt.ylabel("Value")
+        # plt.show()
 
         active_indices = np.where(spins == 1)[0]
         n_active = len(active_indices)
@@ -134,6 +156,7 @@ def run_sim(beta, mode='allocentric'):
         else:
             phi = 0.0  
         pop_angles[t] = phi
+        bump_for_time.append(phi)
 
         if mode == 'egocentric':
             # egocentric motion
@@ -149,6 +172,11 @@ def run_sim(beta, mode='allocentric'):
 
         spins_history[t] = copy.deepcopy(spins)
 
+    plt.plot(range(L), total_H)
+    plt.title("total_H for neurons")
+    plt.xlabel("Index")
+    plt.ylabel("Value")
+    plt.show()
     return {
         "spins_history": spins_history,
         "pop_angles": pop_angles,
@@ -217,3 +245,36 @@ for i, beta in enumerate(beta_list):
 
 plt.tight_layout()
 plt.show()
+
+hext_for_time = []
+bump_for_time = []
+target_for_time = []
+
+T, N_s = hext_for_time.shape
+alpha_deg = np.degrees(thetas) 
+target_angles = np.degrees(target_for_time) 
+bump_angles = np.degrees(bump_for_time)
+fig, ax = plt.subplots(figsize=(8, 4))
+bar_container = ax.bar(alpha_deg, hext_for_time[0], width=360 / N_s, color='skyblue')
+target_line = ax.axvline(x=0, color='orange', linestyle='--', label='Target angle')
+bump_line = ax.axvline(x=0, color='green', linestyle='-', label='Bump angle')
+
+ax.set_xlim(-180, 180)
+ax.set_ylim(0, np.max(hext_for_time) * 1.1)
+ax.set_xlabel("Angle (°)")
+ax.set_ylabel("h_i (External Input)")
+ax.set_title("External Input h_i vs. Angle Over Time")
+
+def update(frame):
+    for rect, h in zip(bar_container, hext_for_time[frame]):
+        rect.set_height(h)
+    target_line.set_xdata(target_angles[frame])
+    bump_line.set_xdata(bump_angles[frame])
+    ax.set_title(f"External Input h_i (t={frame})")
+    time.sleep(0.2)
+    return list(bar_container) + [target_line] + [bump_line]
+
+ani = FuncAnimation(fig, update, frames=T, blit=False, interval=50)
+plt.tight_layout()
+plt.show()
+#functionAnimation
