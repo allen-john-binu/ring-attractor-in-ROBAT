@@ -4,27 +4,31 @@ import matplotlib.pyplot as plt
 import copy
 import time
 from matplotlib.animation import FuncAnimation
+from random import randrange, seed as py_seed
 
-np.random.seed(1)
+seed = 100 
+np.random.seed(seed)
+py_seed(seed)
+
 
 Ns = 100
-L = 100   
-v0 = 6.0              
+L = 100
+v0 = 60             
 sigma_ang = 5*np.pi / Ns
 diff_neurons_angle = 2*np.pi / Ns
-h0 = 0.0051
-hb = 0.00122
+h0 = 0.051
+hb = 0.0122
 
-target_pos = np.array([50.0, 0.0])  
+target_pos = np.array([-50.0, -50.0])  
 
 # for each neuron group what is the angles 
-thetas = np.arange(Ns) * diff_neurons_angle - np.pi 
+thetas = np.linspace(-np.pi, np.pi, Ns, endpoint=False)
 
 # list of beta values to sweep (low -> high order)
 beta_list = [400.0] #1.0,5.0,
 
 # number of attempted spin updates per motion step
-t0 = 10
+t0 = 5
 updates_per_step = int(round(Ns * t0))
 
 def circ_dist(a, b):
@@ -33,20 +37,18 @@ def circ_dist(a, b):
 
 # Compute dynamic external field depending on i
 def compute_h_ext_for_i(theta_diff):
-    difference_target = circ_dist(thetas, theta_diff)
+    difference_target = (thetas - theta_diff + np.pi) % (2 * np.pi) - np.pi
     return (h0 / np.sqrt(2 * np.pi * (sigma_ang**2))) * np.exp(- (difference_target ** 2) / (2 * (sigma_ang**2) ) )
 
 # synaptic connectivity of the network, J with parameter v
 v = 0.5  # shape parameter
 def compute_J(i):
-    considering_alhpa_i = copy.deepcopy(thetas[i])
-    considering_alphas = copy.deepcopy(thetas)
-    
-    angle_diffs = np.abs((considering_alphas - considering_alhpa_i + np.pi) % (2 * np.pi) - np.pi)
-    angle_diffs = angle_diffs.squeeze()
-    normalized = angle_diffs / np.pi 
-    powered = normalized ** v
-    return np.cos((np.pi * powered))
+    kernel = None
+    alpha_i = copy.deepcopy(thetas[i])
+    angle_diffs = np.abs((copy.deepcopy(thetas) - alpha_i + np.pi) % (2 * np.pi) - np.pi)
+    kernel = np.cos(np.pi * ((angle_diffs / np.pi) ** v))
+    #print(kernel)
+    return kernel
 
 dist = circ_dist(thetas[:, None], thetas[None, :])
 J_full = np.cos(np.pi * (dist / np.pi) ** v)
@@ -63,23 +65,23 @@ J_full = np.cos(np.pi * (dist / np.pi) ** v)
 
 # compute Hamiltonian for the system
 def compute_delta_H(spins, h_ext, i):
+    H = np.zeros(2)
     computing_spins = copy.deepcopy(spins)
     j_curr = compute_J(i)
     j_curr[i] = 0  # zero out self-connection
 
-    spins_energy = np.dot(j_curr, computing_spins)
-    before_spin = copy.deepcopy(computing_spins[i])
-    after_spin = 1 - before_spin
+    interaction_sum = np.dot(j_curr, spins)
+   
+    spin_flip = np.array([spins[i], 1-spins[i]])
+    #spin_flip = np.array([ra.sigma[i], -ra.sigma[i]])
 
-    external_energy_before = (h_ext[i] * before_spin) - (hb * before_spin)
-    spins_energy_before = (1.0 / (Ns-1)) * spins_energy * before_spin
-    H_before = - (spins_energy_before + external_energy_before)
+    interaction_energy = (interaction_sum * spin_flip) / (100 - 1)
 
-    external_energy_after = (h_ext[i] * after_spin) - (hb * after_spin)
-    spins_energy_after = (1.0 / (Ns-1)) * spins_energy * after_spin
-    H_after = - (spins_energy_after + external_energy_after)
-
-    return (H_after - H_before)
+    input_energy = h_ext[i] * spin_flip
+    leak_energy = 0.0122 * spin_flip
+    H = -1 * (interaction_energy + input_energy - leak_energy)
+    print(H[1] - H[0])
+    return (H[1] - H[0])
 
 def compute_total_H(spins, h_ext):
     computing_spins = copy.deepcopy(spins)
@@ -93,8 +95,10 @@ target_for_time = []
 
 def run_sim(beta, mode='allocentric'):
     # initial random spins with equal number of -1 and 1
-    spins = np.concatenate((np.ones(Ns // 2, dtype=int), np.zeros(Ns // 2, dtype=int)))
-    np.random.shuffle(spins)
+    #spins = np.concatenate((np.ones(Ns // 2, dtype=int), np.zeros(Ns // 2, dtype=int)))
+    #np.random.shuffle(spins)
+    spins = np.random.choice([1,0], size=Ns)
+
     spins_history = np.zeros((L, Ns), dtype=int)
     pop_angles = np.zeros(L)
 
@@ -117,13 +121,13 @@ def run_sim(beta, mode='allocentric'):
         acc_downhill = 0
 
         h_ext = compute_h_ext_for_i(theta_diff)
+
         hext_for_time.append(h_ext)
         target_for_time.append(theta_target)
         total_H.append(compute_total_H(spins, h_ext))
         for _ in range(updates_per_step):
             i = np.random.randint(0,Ns) 
             delta_H = compute_delta_H(spins, h_ext, i)
-
             deltaH_list.append(delta_H)
 
             if delta_H < 0:
@@ -141,18 +145,22 @@ def run_sim(beta, mode='allocentric'):
                     n_accepted += 1
                     acc_uphill += 1 
 
-        # plt.plot(np.degrees(thetas), h_ext)
-        # plt.title("h_ext for neurons with target")
-        # plt.xlabel("Index")
-        # plt.ylabel("Value")
-        # plt.show()
+        plt.plot(np.degrees(thetas), h_ext)
+        plt.title("h_ext for neurons with target")
+        plt.xlabel("Index")
+        plt.ylabel("Value")
+        #plt.show()
 
         active_indices = np.where(spins == 1)[0]
         n_active = len(active_indices)
         if n_active > 0:
-            phi = np.angle(np.sum(np.exp(1j * thetas[active_indices])))
+
+            phi = np.angle(np.sum(np.exp(1j * thetas[spins == 1])))
+            #phi = np.angle(np.sum(np.exp(1j * thetas[active_indices])))
             thethaDegree = math.degrees(phi)
-            print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active," -- Accepted:", n_accepted,"-  Downhill accepted:", acc_downhill, " -   Uphill accepted:", acc_uphill, " -   Delta_H mean: ",np.mean(deltaH_list))
+            print(thethaDegree)
+            #print(np.degrees(phi))
+            #print("At ", t, " ,Angle phi (degrees):", thethaDegree, " with n_active:", n_active," -- Accepted:", n_accepted,"-  Downhill accepted:", acc_downhill, " -   Uphill accepted:", acc_uphill, " -   Delta_H mean: ",np.mean(deltaH_list))
         else:
             phi = 0.0  
         pop_angles[t] = phi
@@ -167,8 +175,8 @@ def run_sim(beta, mode='allocentric'):
         else:
             # allocentric motion
             if t < L-1:
-                pos[t+1, 0] = pos[t, 0] + v0 * np.cos(phi)
-                pos[t+1, 1] = pos[t, 1] + v0 * np.sin(phi)
+                pos[t+1, 0] = pos[t, 0] + v0 * np.cos(phi)/Ns
+                pos[t+1, 1] = pos[t, 1] + v0 * np.sin(phi)/Ns
 
         spins_history[t] = copy.deepcopy(spins)
 
