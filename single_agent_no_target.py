@@ -16,7 +16,7 @@ class RA():
         self.h_b = 0
         self.v_0 = 1
         self.h_ext = None
-        self.beta = 4000.0
+        self.beta = 200.0 #10
         self.sigma_ang = 2*np.pi/self.Ns
         self.thetas = np.linspace(-np.pi, np.pi, self.Ns, endpoint=False)
         self.spins = np.random.choice([1,0], size=self.Ns)
@@ -25,7 +25,7 @@ class RA():
         self.updates_per_step = int(round(self.Ns * 10))
 
 ring = RA()
-L = 1000
+L = 300
 
 pos_alloc = np.zeros((L, 2))
 pos_ego = np.zeros((L, 2))
@@ -63,9 +63,11 @@ for t in range (L):
     # egocentric motion
     heading = (phi + heading) % (2 * np.pi) 
     if t < L-1:
-        pos_ego[t+1, 0] = pos_ego[t, 0] + ring.v_0 * np.cos(heading)/ring.Ns
-        pos_ego[t+1, 1] = pos_ego[t, 1] + ring.v_0 * np.sin(heading)/ring.Ns
+        pos_ego[t+1, 0] = pos_ego[t, 0] + ring.v_0 * np.cos(heading)
+        pos_ego[t+1, 1] = pos_ego[t, 1] + ring.v_0 * np.sin(heading)
 
     spins_history[t] = copy.deepcopy(ring.spins)
+
+    print(f'Time step {t+1}/{L},Bump angle: {bump_angles[t]:.2f} degrees, ')
 
 utils.plot_summary_no_target(ring,pos_alloc,pos_ego,spins_history,bump_angles,L)

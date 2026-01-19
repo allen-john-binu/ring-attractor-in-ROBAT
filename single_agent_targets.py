@@ -8,11 +8,12 @@ seed = 100
 np.random.seed(seed)
 py_seed(seed)
 
-target_pos = np.array([50.0, 50.0])  
+target_pos1 = np.array([50.0, 50.0])  
+target_pos2 = np.array([50.0, -50.0])  
 
 class RA():
     def __init__(self):
-        self.Ns = 100
+        self.Ns = 300 
         self.v = 0.5
         self.h_0 = 0.051
         self.h_b = 0.0122
@@ -23,14 +24,18 @@ class RA():
         self.thetas = np.linspace(-np.pi, np.pi, self.Ns, endpoint=False)
         self.spins = np.random.choice([1,0], size=self.Ns)
         self.pos = np.zeros(2)
-        self.allocentric = False
+        self.allocentric = True
         self.heading = 0
-        self.updates_per_step = int(round(self.Ns * 10))
+        self.updates_per_step = int(round(self.Ns * 4))
 
 ring = RA()
-L = 200
-target_reached_L = -1
+L = 1000
 
+def euclidean_distance(p1, p2):
+    return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+
+previous_distance1 =1000000
+previous_distance2 =1000000
 
 pos = np.zeros((L, 2))
 bump_angles = np.zeros(L)
@@ -43,33 +48,43 @@ distance_between_target = np.zeros(L)
 # for animation
 hext_for_time = []
 target_for_time = np.zeros(L)
-
-def euclidean_distance(p1, p2):
-    return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
-
-previous_distance =1000000
+target_reached_L = -1
 
 for t in range (L):
-    dist_to_target = euclidean_distance(pos[t], target_pos)
-    if (dist_to_target > previous_distance):
+    dist_to_target1 = euclidean_distance(pos[t], target_pos1)
+    dist_to_target2 = euclidean_distance(pos[t], target_pos2)
+    if (dist_to_target1 > previous_distance1) and (dist_to_target2 > previous_distance2):
         target_reached_L = t
         break
-
-    previous_distance = dist_to_target
-    theta_target = np.arctan2( target_pos[1] - pos[t][1],target_pos[0] - pos[t][0])
+    # if (dist_to_target2 > previous_distance1):
+    #     target_reached_L = t
+    #     break
+    # print(dist_to_target1,dist_to_target2)
+    previous_distance1 = dist_to_target1
+    previous_distance2 = dist_to_target2
+    theta_target1 = np.arctan2( target_pos1[1] - pos[t][1],target_pos1[0] - pos[t][0])
+    theta_target2 = np.arctan2( target_pos2[1] - pos[t][1],target_pos2[0] - pos[t][0])
     if ring.allocentric:
-        theta_diff = theta_target
+        theta_diff1 = theta_target1
+        theta_diff2 = theta_target2
     else:
-        theta_diff = (theta_target-heading) % (2 * np.pi) 
+        theta_diff1 = (theta_target1-heading) % (2 * np.pi) 
+        theta_diff2 = (theta_target2-heading) % (2 * np.pi)
 
-    utils.compute_h_ext(ring,theta_diff) #check this line
+    # if t%10 == 0 and t>1:    
+    #     utils.compute_h_ext_multiple(ring,[ theta_diff2])
+    # else:   
+    #     utils.compute_h_ext_multiple(ring,[theta_diff1, theta_diff2])
+        
+
+    utils.compute_h_ext_multiple(ring,[theta_diff1, theta_diff2])
 
     #for animation
     hext_for_time.append(ring.h_ext)
-
-    utils.plot_any_line([math.degrees(theta) for theta in ring.thetas],ring.h_ext, 'Neuron index', 'h_i','External Sensory Input (h_i) vs Neuron index')
-    target_for_time[t] = theta_target
+    target_for_time[t] = theta_target1 # incorrect for two targets, but leave as is for simplicity
         
+    #utils.plot_any_line([math.degrees(theta) for theta in ring.thetas],ring.h_ext, 'Neuron index', 'h_i','External Sensory Input (h_i) vs Neuron index')
+    
     for _ in range (ring.updates_per_step):
         i = np.random.randint(0,ring.Ns)
         delta_H = utils.compute_delta_H(ring,i)
@@ -91,7 +106,7 @@ for t in range (L):
         phi = 0.0  
     bump_angles[t] = math.degrees(phi)
 
-    print(f'Time step {t+1}/{L}, Position: {pos[t]}, theta_target: {math.degrees(theta_target):.2f} degrees, Bump angle: {bump_angles[t]:.2f} degrees, num_step: {ring.updates_per_step}')
+    print(f'Time step {t+1}/{L}, Position: {pos[t]}, theta_targets: {[math.degrees(ayyo) for ayyo in [theta_target1, theta_target2]]} degrees, Bump angle: {bump_angles[t]:.2f} degrees, num_step: {ring.updates_per_step}')
 
     
     if ring.allocentric:
@@ -108,10 +123,10 @@ for t in range (L):
 
     spins_history[t] = copy.deepcopy(ring.spins)
 
-print("Simulation complete.: ",target_reached_L)
+print("Simulation complete. ")
 
 if target_reached_L == -1:
-    utils.plot_summary_with_target(ring,pos,spins_history,bump_angles,target_pos,L)
+    utils.plot_summary_with_multiple_targets(ring,pos,spins_history,bump_angles,[target_pos1, target_pos2],L)
 else:
     print("Target reached at time step: ",target_reached_L)
-    utils.plot_summary_with_target(ring,pos[:target_reached_L],spins_history[:target_reached_L],bump_angles[:target_reached_L],target_pos,target_reached_L,False)
+    utils.plot_summary_with_multiple_targets(ring,pos[:target_reached_L],spins_history[:target_reached_L],bump_angles[:target_reached_L],[target_pos1, target_pos2],target_reached_L)
